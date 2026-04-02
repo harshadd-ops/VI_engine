@@ -1,0 +1,20 @@
+# ──────────────────────────────────────────────────────────────
+# MindstriX Vegetation Index Engine — Dependencies
+# ──────────────────────────────────────────────────────────────
+
+# Google Earth Engine Python API
+earthengine-api>=0.1.390
+
+# Data handling
+numpy>=1.26.0
+pandas>=2.2.0
+
+# Geospatial (future shapefile / batch farm workflows)
+geopandas>=0.14.0
+shapely>=2.0.0
+
+# Visualization (future time-series plotting)
+matplotlib>=3.8.0
+
+# HTTP / API layer (future FastAPI integration)
+requests>=2.31.0
