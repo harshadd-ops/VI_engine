@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="MindstriX CVI Engine — Draw a farm polygon and visualize Composite Vegetation Index data powered by Sentinel-2 satellite imagery." />
+  <title>CVI Engine — MindstriX Farm Intelligence</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Leaflet Draw CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- App Styles -->
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <!-- ─── Top Navigation Bar ─────────────────────────────────────────── -->
+  <header class="navbar" role="banner">
+    <div class="navbar__brand">
+      <span class="navbar__logo" aria-hidden="true">🛰️</span>
+      <div class="navbar__text">
+        <span class="navbar__title">CVI Engine</span>
+        <span class="navbar__tagline">Farm Vegetation Intelligence · MindstriX</span>
+      </div>
+    </div>
+    <div class="navbar__status" id="status-badge" role="status" aria-live="polite">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">Ready — Draw a farm polygon</span>
+    </div>
+  </header>
+
+  <!-- ─── Main Layout ────────────────────────────────────────────────── -->
+  <main class="app-layout" role="main">
+
+    <!-- ─── Sidebar ──────────────────────────────────────── -->
+    <aside class="sidebar" role="complementary" aria-label="Farm Analysis Panel">
+
+      <!-- Instructions Card -->
+      <section class="card" id="card-instructions" aria-labelledby="instructions-heading">
+        <h2 class="card__title" id="instructions-heading">
+          <span class="card__icon">📍</span> How to Analyze
+        </h2>
+        <ol class="steps-list">
+          <li class="step">
+            <span class="step__num">1</span>
+            <span class="step__text">Click the <strong>polygon tool</strong> on the map</span>
+          </li>
+          <li class="step">
+            <span class="step__num">2</span>
+            <span class="step__text">Draw your <strong>farm boundary</strong> by clicking vertices</span>
+          </li>
+          <li class="step">
+            <span class="step__num">3</span>
+            <span class="step__text">Close the polygon — analysis <strong>starts automatically</strong></span>
+          </li>
+          <li class="step">
+            <span class="step__num">4</span>
+            <span class="step__text">Click any <strong>grid cell</strong> to view detailed indices</span>
+          </li>
+        </ol>
+      </section>
+
+      <!-- Legend Card -->
+      <section class="card" id="card-legend" aria-labelledby="legend-heading">
+        <h2 class="card__title" id="legend-heading">
+          <span class="card__icon">🎨</span> CVI Legend
+        </h2>
+        <ul class="legend-list" role="list">
+          <li class="legend-item">
+            <span class="legend-swatch legend-swatch--healthy" aria-label="Green"></span>
+            <div class="legend-label">
+              <span class="legend-label__title">Healthy Vegetation</span>
+              <span class="legend-label__range">CVI &gt; 0.6</span>
+            </div>
+          </li>
+          <li class="legend-item">
+            <span class="legend-swatch legend-swatch--moderate" aria-label="Yellow"></span>
+            <div class="legend-label">
+              <span class="legend-label__title">Moderate / Stressed</span>
+              <span class="legend-label__range">CVI 0.3 – 0.6</span>
+            </div>
+          </li>
+          <li class="legend-item">
+            <span class="legend-swatch legend-swatch--poor" aria-label="Red"></span>
+            <div class="legend-label">
+              <span class="legend-label__title">Poor Vegetation</span>
+              <span class="legend-label__range">CVI &lt; 0.3</span>
+            </div>
+          </li>
+          <li class="legend-item">
+            <span class="legend-swatch legend-swatch--nodata" aria-label="Grey"></span>
+            <div class="legend-label">
+              <span class="legend-label__title">No Data</span>
+              <span class="legend-label__range">Cloud / masked</span>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <!-- Results Summary Card (hidden until analysis complete) -->
+      <section class="card card--results" id="card-results" aria-labelledby="results-heading" hidden>
+        <h2 class="card__title" id="results-heading">
+          <span class="card__icon">📊</span> Farm Summary
+        </h2>
+        <div class="summary-grid" id="summary-grid" role="region" aria-label="Vegetation summary metrics">
+          <!-- Injected by script.js -->
+        </div>
+        <button class="btn btn--secondary btn--sm" id="btn-clear" type="button">
+          ✕ Clear &amp; Reset
+        </button>
+      </section>
+
+      <!-- Error Card (hidden until error) -->
+      <section class="card card--error" id="card-error" aria-labelledby="error-heading" hidden>
+        <h2 class="card__title" id="error-heading">
+          <span class="card__icon">⚠️</span> Analysis Error
+        </h2>
+        <p class="error-message" id="error-message" role="alert"></p>
+        <button class="btn btn--secondary btn--sm" id="btn-retry" type="button">
+          ↩ Try Again
+        </button>
+      </section>
+
+    </aside>
+
+    <!-- ─── Map Container ──────────────────────────────────── -->
+    <div class="map-wrapper">
+      <div id="map" role="application" aria-label="Interactive farm map"></div>
+
+      <!-- Loading Overlay -->
+      <div class="loading-overlay" id="loading-overlay" aria-hidden="true" hidden>
+        <div class="spinner-card">
+          <div class="spinner" role="status" aria-label="Loading satellite data">
+            <div class="spinner__ring"></div>
+            <div class="spinner__ring spinner__ring--2"></div>
+            <div class="spinner__ring spinner__ring--3"></div>
+          </div>
+          <p class="spinner-card__title">Fetching Satellite Data</p>
+          <p class="spinner-card__subtitle">Querying Sentinel-2 imagery via Google Earth Engine…</p>
+          <div class="progress-steps" id="progress-steps">
+            <div class="progress-step progress-step--active" id="step-1">Cloud masking</div>
+            <div class="progress-step" id="step-2">Computing indices</div>
+            <div class="progress-step" id="step-3">Grid generation</div>
+            <div class="progress-step" id="step-4">Returning results</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ─── Scripts ────────────────────────────────────────────────────── -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+  <script src="/static/script.js"></script>
+</body>
+</html>

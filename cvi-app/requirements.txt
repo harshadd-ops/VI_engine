@@ -1,0 +1,13 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# MindstriX CVI Engine — Web API Dependencies
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Web framework
+Flask>=3.0.0
+flask-cors>=4.0.0
+
+# Google Earth Engine Python API
+earthengine-api>=0.1.390
+
+# Utilities
+python-dotenv>=1.0.0
