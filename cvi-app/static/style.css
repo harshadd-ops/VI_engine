@@ -242,6 +242,40 @@ html, body {
   font-size: 15px;
 }
 
+/* ── Location Form ──────────────────────────────────────────────────────── */
+.location-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-group {
+  display: flex;
+  gap: 8px;
+}
+
+.form-group input {
+  width: 50%;
+  background: var(--c-surface-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  color: var(--c-text);
+  font-family: var(--font-body);
+  font-size: 12px;
+  transition: var(--t-fast);
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: var(--c-accent);
+  background: var(--c-surface);
+}
+
+.form-group input::placeholder {
+  color: var(--c-text-faint);
+}
+
 /* ── Steps List ─────────────────────────────────────────────────────────── */
 .steps-list {
   list-style: none;

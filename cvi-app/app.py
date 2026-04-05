@@ -26,7 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 from flask import Flask, request, jsonify, render_template
 
 from config import LOG_LEVEL, LOG_FORMAT, LOG_DATE, LOG_FILE, GEE_PROJECT_ID
-from services.gee_service import initialize_gee, get_sentinel_composite
+from services.gee_service import initialize_gee, get_sentinel_composite, get_image_tile_url
 from services.index_service import compute_all_indices
 from services.grid_service import generate_grid, reduce_grid_values
 from services.stats_service import extract_farm_statistics
@@ -143,6 +143,15 @@ def analyze():
         # ── 6. Extract whole farm statistics ─────────────────────────────────
         farm_summary = extract_farm_statistics(indexed_image, collection, ee_geometry, scene_count)
         result_geojson["farm_summary"] = farm_summary
+
+        # ── 7. Generate GEE Tile URL for Heatmap ─────────────────────────────
+        vis_params = {
+            'bands': ['CVI'],
+            'min': 0.0,
+            'max': 1.0,
+            'palette': ['#ef4444', '#f59e0b', '#22c55e'] # Red -> Yellow -> Green
+        }
+        result_geojson["tile_url"] = get_image_tile_url(indexed_image, vis_params)
 
         logger.info(
             "Analysis complete — %d scenes, %d grid cells returned, Confidence: %.4f",
