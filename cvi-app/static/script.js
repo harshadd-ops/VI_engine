@@ -27,6 +27,7 @@ const STATE = {
   map:          null,
   drawnLayer:   null,   // The user's drawn polygon layer
   gridLayer:    null,   // The GEE result grid layer
+  geeLayer:     null,   // The GEE heatmap tile layer
   isLoading:    false,
   currentStep:  0,      // Progress step tracker
   stepTimer:    null,
@@ -43,6 +44,9 @@ const DOM = {
   cardError:      () => document.getElementById("card-error"),
   summaryGrid:    () => document.getElementById("summary-grid"),
   errorMessage:   () => document.getElementById("error-message"),
+  locationForm:   () => document.getElementById("location-form"),
+  inputLat:       () => document.getElementById("input-lat"),
+  inputLon:       () => document.getElementById("input-lon"),
   btnClear:       () => document.getElementById("btn-clear"),
   btnRetry:       () => document.getElementById("btn-retry"),
   steps:          [1, 2, 3, 4].map(i => () => document.getElementById(`step-${i}`)),
@@ -220,26 +224,17 @@ const MapModule = {
       attributionControl: true,
     });
 
-    // Esri World Imagery (satellite tiles)
+    // Google Maps Satellite (Hybrid with Labels)
     L.tileLayer(
-      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      "http://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
       {
-        attribution: "Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics",
-        maxZoom: 19,
+        maxZoom: 20,
+        subdomains: ["mt0", "mt1", "mt2", "mt3"],
+        attribution: "Map data © Google",
       }
     ).addTo(STATE.map);
 
-    // Esri labels overlay (keeps city/road names visible)
-    L.tileLayer(
-      "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-      {
-        attribution: "",
-        maxZoom: 19,
-        opacity: 0.7,
-      }
-    ).addTo(STATE.map);
-
-    console.info("[CVI Engine] Leaflet map initialized.");
+    console.info("[CVI Engine] Leaflet map initialized with Google Satellite.");
   },
 
   /** Return a fill colour based on CVI value */
@@ -252,12 +247,12 @@ const MapModule = {
 
   /** GeoJSON style function for grid cells */
   _cellStyle(feature) {
-    const cvi = feature.properties.cvi;
+    // Keep it invisible array so the smooth heatmap shows, but cell is interactive
     return {
-      fillColor:   MapModule.getCVIColor(cvi),
-      fillOpacity: 0.55,
-      color:       "rgba(255,255,255,0.25)",
-      weight:      0.8,
+      fillColor:   "transparent",
+      fillOpacity: 0,
+      color:       "transparent",
+      weight:      0,
     };
   },
 
@@ -322,6 +317,17 @@ const MapModule = {
       return;
     }
 
+    // Add GEE Heatmap Layer if available
+    if (geojsonData.tile_url) {
+      if (STATE.geeLayer) {
+        STATE.map.removeLayer(STATE.geeLayer);
+      }
+      STATE.geeLayer = L.tileLayer(geojsonData.tile_url, {
+        attribution: "Google Earth Engine",
+        opacity: 0.75, // slightly transparent so grid lines are still visible
+      }).addTo(STATE.map);
+    }
+
     STATE.gridLayer = L.geoJSON(geojsonData, {
       style:       MapModule._cellStyle,
       onEachFeature(feature, layer) {
@@ -335,9 +341,9 @@ const MapModule = {
         layer.on({
           mouseover(e) {
             e.target.setStyle({
-              fillOpacity: 0.75,
+              fillOpacity: 0.1,
               weight: 1.5,
-              color: "rgba(255,255,255,0.5)",
+              color: "rgba(255,255,255,0.8)",
             });
           },
           mouseout(e) {
@@ -362,7 +368,27 @@ const MapModule = {
       STATE.map.removeLayer(STATE.gridLayer);
       STATE.gridLayer = null;
     }
+    if (STATE.geeLayer) {
+      STATE.map.removeLayer(STATE.geeLayer);
+      STATE.geeLayer = null;
+    }
   },
+
+  /** Fly to a specific coordinate */
+  flyTo(lat, lon) {
+    if (!STATE.map) return;
+    STATE.map.flyTo([lat, lon], 16, { animate: true, duration: 1.5 });
+    
+    // Add a temporary marker to show the exact point
+    const marker = L.marker([lat, lon]).addTo(STATE.map)
+      .bindPopup("Target Location")
+      .openPopup();
+      
+    // Auto-remove marker when a polygon is drawn
+    STATE.map.once(L.Draw.Event.CREATED, () => {
+      STATE.map.removeLayer(marker);
+    });
+  }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -527,6 +553,20 @@ function bindButtons() {
       AnalysisModule.analyze(geojson.geometry);
     }
   });
+
+  // Location Form
+  const locForm = DOM.locationForm();
+  if (locForm) {
+    locForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const lat = parseFloat(DOM.inputLat().value);
+      const lon = parseFloat(DOM.inputLon().value);
+      
+      if (!isNaN(lat) && !isNaN(lon)) {
+        MapModule.flyTo(lat, lon);
+      }
+    });
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

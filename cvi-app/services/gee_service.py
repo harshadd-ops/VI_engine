@@ -41,6 +41,7 @@ def initialize_gee() -> bool:
     """
     try:
         logger.info("Initialising GEE (project: %s)…", GEE_PROJECT_ID)
+        ee.Authenticate()
         ee.Initialize(project=GEE_PROJECT_ID)
         logger.info("GEE initialised successfully.")
         return True
@@ -134,3 +135,16 @@ def get_sentinel_composite(
     composite = collection.median()
     logger.info("Median composite built from %d scene(s).", scene_count)
     return composite, collection, scene_count
+
+
+def get_image_tile_url(image: ee.Image, vis_params: dict) -> str | None:
+    """
+    Get a temporary GEE map tile URL for the given image and visualization params.
+    """
+    try:
+        map_id_dict = ee.data.getMapId({'image': image, **vis_params})
+        return map_id_dict['tile_fetcher'].url_format
+    except Exception as exc:
+        logger.error("Failed to generate tile URL: %s", exc)
+        return None
+

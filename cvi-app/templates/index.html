@@ -66,6 +66,20 @@
         </ol>
       </section>
 
+      <!-- Location Card -->
+      <section class="card" id="card-location" aria-labelledby="location-heading">
+        <h2 class="card__title" id="location-heading">
+          <span class="card__icon">🌎</span> Fly to Location
+        </h2>
+        <form class="location-form" id="location-form">
+          <div class="form-group">
+            <input type="number" id="input-lat" step="any" placeholder="Latitude (e.g. 20.59)" required />
+            <input type="number" id="input-lon" step="any" placeholder="Longitude (e.g. 78.96)" required />
+          </div>
+          <button type="submit" class="btn btn--primary btn--sm" style="width:100%; margin-top:0.5rem;">Fly to Coordinates</button>
+        </form>
+      </section>
+
       <!-- Legend Card -->
       <section class="card" id="card-legend" aria-labelledby="legend-heading">
         <h2 class="card__title" id="legend-heading">
