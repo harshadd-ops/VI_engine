@@ -4,16 +4,18 @@
  * MindstriX Farm Visualization Interface
  *
  * Responsibilities:
- *   1. Initialize Leaflet map with Esri satellite tiles
+ *   1. Initialize Leaflet map with Google satellite tiles
  *   2. Enable polygon-only drawing via Leaflet Draw
  *   3. POST drawn polygon to /api/analyze
- *   4. Render GeoJSON grid with CVI-based color coding
- *   5. Show per-cell popup on click (NDVI, CVI, interpretation)
- *   6. Manage loading state, errors, and results summary
- *   7. Progress step animation during API call
+ *   4. Render smooth EOS-style NDVI heatmap via GEE tile layer
+ *   5. NDVI/CVI layer toggle with smooth transitions
+ *   6. Real-time hover tooltip with debounced GEE point sampling
+ *   7. Show per-cell popup on click (NDVI, CVI, interpretation)
+ *   8. Manage loading state, errors, and results summary
+ *   9. Progress step animation during API call
  *
  * Architecture:
- *   - Grouped into: MapModule, DrawModule, AnalysisModule, UIModule
+ *   - Grouped into: MapModule, DrawModule, AnalysisModule, HoverModule, UIModule
  *   - All DOM queries are cached at module init
  *   - No framework dependencies — vanilla JS only
  */
@@ -24,13 +26,19 @@
 // State
 // ─────────────────────────────────────────────────────────────────────────────
 const STATE = {
-  map:          null,
-  drawnLayer:   null,   // The user's drawn polygon layer
-  gridLayer:    null,   // The GEE result grid layer
-  geeLayer:     null,   // The GEE heatmap tile layer
-  isLoading:    false,
-  currentStep:  0,      // Progress step tracker
-  stepTimer:    null,
+  map:               null,
+  drawnLayer:        null,   // The user's drawn polygon layer
+  gridLayer:         null,   // The GEE result grid layer
+  geeLayer:          null,   // The active heatmap tile layer
+  indexTiles:        {},     // { ndvi: 'url', evi: 'url', ... }
+  ndviTileUrl:       null,   // Legacy compat
+  cviTileUrl:        null,   // Legacy compat
+  activeLayer:       "ndvi", // Which index is currently shown
+  isLoading:         false,
+  currentStep:       0,      // Progress step tracker
+  stepTimer:         null,
+  hasAnalysis:       false,  // Whether we have an analysis active
+  hoveredProperties: null,   // Currently hovered grid cell properties
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -49,8 +57,51 @@ const DOM = {
   inputLon:       () => document.getElementById("input-lon"),
   btnClear:       () => document.getElementById("btn-clear"),
   btnRetry:       () => document.getElementById("btn-retry"),
+  ndviTooltip:    () => document.getElementById("ndvi-tooltip"),
+  ndviTooltipVal: () => document.getElementById("ndvi-tooltip-value"),
+  ndviTooltipLbl: () => document.getElementById("ndvi-tooltip-label"),
+  ndviTooltipSw:  () => document.getElementById("ndvi-tooltip-swatch"),
+  layerToggle:    () => document.getElementById("layer-toggle"),
+  // Legend
+  legend:         () => document.getElementById("ndvi-legend"),
+  legendTitle:    () => document.getElementById("ndvi-legend-title"),
+  // Layer buttons
+  layerBtns:      () => document.querySelectorAll(".layer-toggle__btn"),
   steps:          [1, 2, 3, 4].map(i => () => document.getElementById(`step-${i}`)),
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EOS Palette Utilities
+// ─────────────────────────────────────────────────────────────────────────────
+const EOS_PALETTE = [
+  { stop: 0.0,   color: [139, 0, 0] },    // #8b0000
+  { stop: 0.125, color: [255, 60, 0] },   // #ff3c00
+  { stop: 0.25,  color: [255, 122, 0] },  // #ff7a00
+  { stop: 0.375, color: [255, 179, 0] },  // #ffb300
+  { stop: 0.5,   color: [255, 242, 0] },  // #fff200
+  { stop: 0.625, color: [198, 255, 0] },  // #c6ff00
+  { stop: 0.75,  color: [125, 255, 0] },  // #7dff00
+  { stop: 0.875, color: [42, 255, 0] },   // #2aff00
+  { stop: 1.0,   color: [0, 127, 0] },    // #007f00
+];
+
+function ndviToColor(value) {
+  if (value === null || value === undefined || isNaN(value)) return "#4b5563";
+  const v = Math.max(0, Math.min(1, value));
+  
+  for (let i = 0; i < EOS_PALETTE.length - 1; i++) {
+    const curr = EOS_PALETTE[i];
+    const next = EOS_PALETTE[i + 1];
+    if (v >= curr.stop && v <= next.stop) {
+      const t = (v - curr.stop) / (next.stop - curr.stop);
+      const r = Math.round(curr.color[0] + t * (next.color[0] - curr.color[0]));
+      const g = Math.round(curr.color[1] + t * (next.color[1] - curr.color[1]));
+      const b = Math.round(curr.color[2] + t * (next.color[2] - curr.color[2]));
+      return `rgb(${r},${g},${b})`;
+    }
+  }
+  return "#007f00";
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UIModule — status, loading, results, errors
@@ -211,7 +262,7 @@ const UIModule = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MapModule — Leaflet initialisation and grid rendering
+// MapModule — Leaflet initialisation, tile layers, grid rendering
 // ─────────────────────────────────────────────────────────────────────────────
 const MapModule = {
 
@@ -245,9 +296,8 @@ const MapModule = {
     return "#ef4444";
   },
 
-  /** GeoJSON style function for grid cells */
+  /** GeoJSON style function for grid cells — transparent so heatmap shows through */
   _cellStyle(feature) {
-    // Keep it invisible array so the smooth heatmap shows, but cell is interactive
     return {
       fillColor:   "transparent",
       fillOpacity: 0,
@@ -304,6 +354,30 @@ const MapModule = {
     `;
   },
 
+  /**
+   * Set the active heatmap tile layer (NDVI or CVI).
+   * Applies EOS-style opacity and smooth CSS interpolation.
+   */
+  setHeatmapLayer(tileUrl, opacity = 1.0) {
+    // Remove existing heatmap layer
+    if (STATE.geeLayer) {
+      STATE.map.removeLayer(STATE.geeLayer);
+      STATE.geeLayer = null;
+    }
+
+    if (!tileUrl) return;
+
+    STATE.geeLayer = L.tileLayer(tileUrl, {
+      attribution: "Google Earth Engine",
+      opacity: opacity,
+      className: "tile-smooth",  // Applies CSS image-rendering: auto
+      maxZoom: 20,
+      tileSize: 256,
+    }).addTo(STATE.map);
+
+    console.info("[CVI Engine] Heatmap tile layer updated (opacity: %s)", opacity);
+  },
+
   /** Render the GeoJSON FeatureCollection returned by the API */
   renderGrid(geojsonData) {
     // Remove previous grid layer
@@ -317,38 +391,39 @@ const MapModule = {
       return;
     }
 
-    // Add GEE Heatmap Layer if available
-    if (geojsonData.tile_url) {
-      if (STATE.geeLayer) {
-        STATE.map.removeLayer(STATE.geeLayer);
-      }
-      STATE.geeLayer = L.tileLayer(geojsonData.tile_url, {
-        attribution: "Google Earth Engine",
-        opacity: 0.75, // slightly transparent so grid lines are still visible
-      }).addTo(STATE.map);
-    }
+    // ── Cache tile URLs for all indices ──────────────────────────────────
+    STATE.indexTiles  = geojsonData.index_tiles || {};
+    STATE.hasAnalysis = true;
 
+    // ── Add the active heatmap layer ─────────────────────────────────────
+    const activeTileUrl = STATE.indexTiles[`${STATE.activeLayer}_tile_url`];
+    MapModule.setHeatmapLayer(activeTileUrl);
+
+    // ── Show layer toggle & legend ───────────────────────────────────────
+    DOM.layerToggle().classList.add("is-visible");
+    DOM.legend().hidden = false;
+    DOM.legend().classList.add("is-visible");
+
+    // ── Add the interactive grid (transparent, for click/hover) ──────────
     STATE.gridLayer = L.geoJSON(geojsonData, {
       style:       MapModule._cellStyle,
       onEachFeature(feature, layer) {
+        // 1. Popup for detailed "block data" on click
         const html = MapModule._buildPopupHTML(feature.properties);
         layer.bindPopup(html, {
-          maxWidth: 280,
+          maxWidth: 320,
           className: "cvi-popup",
         });
 
-        // Hover highlight
+        // 2. Feature selection for instant tooltip
         layer.on({
-          mouseover(e) {
-            e.target.setStyle({
-              fillOpacity: 0.1,
-              weight: 1.5,
-              color: "rgba(255,255,255,0.8)",
-            });
+          mouseover: () => {
+            STATE.hoveredProperties = feature.properties;
           },
-          mouseout(e) {
-            STATE.gridLayer.resetStyle(e.target);
-          },
+          mouseout: () => {
+            STATE.hoveredProperties = null;
+            HoverModule._hideTooltip();
+          }
         });
       },
     }).addTo(STATE.map);
@@ -372,6 +447,14 @@ const MapModule = {
       STATE.map.removeLayer(STATE.geeLayer);
       STATE.geeLayer = null;
     }
+    STATE.ndviTileUrl = null;
+    STATE.cviTileUrl = null;
+    STATE.hasAnalysis = false;
+
+    // Hide layer toggle & legend
+    DOM.layerToggle().classList.remove("is-visible");
+    DOM.legend().hidden = true;
+    DOM.legend().classList.remove("is-visible");
   },
 
   /** Fly to a specific coordinate */
@@ -388,7 +471,177 @@ const MapModule = {
     STATE.map.once(L.Draw.Event.CREATED, () => {
       STATE.map.removeLayer(marker);
     });
+  },
+
+  /** Generate the HTML content for a grid cell popup */
+  _buildPopupHTML(props) {
+    const inter = props.interpretation || "Unknown status";
+    
+    // Create a list of all index values
+    const indices = [
+      { name: "NDVI",  val: props.ndvi },
+      { name: "CVI",   val: props.cvi },
+      { name: "EVI",   val: props.evi },
+      { name: "SAVI",  val: props.savi },
+      { name: "NDMI",  val: props.ndmi },
+      { name: "GNDVI", val: props.gndvi },
+      { name: "NDWI",  val: props.ndwi },
+    ];
+
+    const rows = indices
+      .map(idx => `
+        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <span style="font-weight: 500; font-size: 13px; color: #a1a1aa;">${idx.name}:</span>
+          <span style="font-weight: 600; font-size: 13px; color: #fff;">${idx.val !== null ? idx.val.toFixed(4) : "N/A"}</span>
+        </div>
+      `)
+      .join("");
+
+    return `
+      <div style="min-width: 180px; font-family: inherit; color: #fff; padding: 4px;">
+        <div style="font-size: 14px; font-weight: 600; margin-bottom: 4px;">Block Analysis</div>
+        <div style="font-size: 12px; font-weight: 400; color: #addd8e; margin-bottom: 12px; line-height: 1.2;">
+          ${inter}
+        </div>
+        <div style="margin-top: 8px;">
+          ${rows}
+        </div>
+      </div>
+    `;
   }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HoverModule — Real-time NDVI hover tooltip with debounced API sampling
+// ─────────────────────────────────────────────────────────────────────────────
+const HoverModule = {
+  _debounceTimer: null,
+  _abortController: null,
+  DEBOUNCE_MS: 150,
+
+  init() {
+    const mapEl = document.getElementById("map");
+    
+    mapEl.addEventListener("mousemove", (e) => {
+      if (!STATE.hasAnalysis || STATE.isLoading) return;
+      
+      // 1. Position tooltip (following cursor)
+      const tooltip = DOM.ndviTooltip();
+      tooltip.style.left = `${e.clientX}px`;
+      tooltip.style.top  = `${e.clientY}px`;
+
+      // 2. Instant Hover logic: Use client-side properties if available
+      if (STATE.hoveredProperties) {
+        const band = STATE.activeLayer.toUpperCase();
+        const val  = STATE.hoveredProperties[STATE.activeLayer];
+
+        if (val !== null && val !== undefined) {
+          HoverModule._showTooltip(val, band);
+        } else {
+          HoverModule._hideTooltip();
+        }
+      } else {
+        HoverModule._hideTooltip();
+      }
+    });
+
+    mapEl.addEventListener("mouseout", () => {
+      HoverModule._hideTooltip();
+      clearTimeout(HoverModule._debounceTimer);
+    });
+
+    console.info("[CVI Engine] Hover tooltip module initialized.");
+  },
+
+  async _sampleAt(lat, lng) {
+    // Abort any in-flight request
+    if (HoverModule._abortController) {
+      HoverModule._abortController.abort();
+    }
+    HoverModule._abortController = new AbortController();
+
+    const band = STATE.activeLayer === "ndvi" ? "NDVI" : "CVI";
+
+    try {
+      const response = await fetch(
+        `/api/sample?lat=${lat}&lng=${lng}&band=${band}`,
+        { signal: HoverModule._abortController.signal }
+      );
+      const data = await response.json();
+
+      if (data.value !== null && data.value !== undefined) {
+        HoverModule._showTooltip(data.value, band);
+      } else {
+        HoverModule._hideTooltip();
+      }
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        // Silently fail — hover is best-effort
+        HoverModule._hideTooltip();
+      }
+    }
+  },
+
+  _showTooltip(value, band) {
+    const tooltip = DOM.ndviTooltip();
+    
+    let labelText = "";
+    if (value < 0.3) labelText = "Sparse vegetation";
+    else if (value <= 0.6) labelText = "Moderate vegetation";
+    else labelText = "Dense vegetation";
+
+    const color = ndviToColor(value);
+
+    tooltip.innerHTML = `
+      <div style="font-weight: 500; font-size: 15px; color: #fff;">
+        <span style="color: ${color}; font-weight: 600;">${band}:</span> ${value.toFixed(2)}
+      </div>
+      <div style="font-size: 13px; font-weight: 400; color: #a1a1aa; margin-top: 4px;">${labelText}</div>
+    `;
+
+    tooltip.classList.add("is-visible");
+    tooltip.setAttribute("aria-hidden", "false");
+  },
+
+  _hideTooltip() {
+    const tooltip = DOM.ndviTooltip();
+    tooltip.classList.remove("is-visible");
+    tooltip.setAttribute("aria-hidden", "true");
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LayerToggleModule — NDVI / CVI switching
+// ─────────────────────────────────────────────────────────────────────────────
+const LayerToggleModule = {
+
+  init() {
+    DOM.layerBtns().forEach(btn => {
+      btn.addEventListener("click", () => {
+        const layer = btn.getAttribute("data-layer");
+        LayerToggleModule.switchTo(layer);
+      });
+    });
+  },
+
+  switchTo(layer) {
+    STATE.activeLayer = layer;
+
+    // Update button states
+    DOM.layerBtns().forEach(btn => {
+      const active = btn.getAttribute("data-layer") === layer;
+      btn.classList.toggle("is-active", active);
+    });
+
+    // Swap tile layer
+    const tileUrl = STATE.indexTiles[`${layer}_tile_url`];
+    MapModule.setHeatmapLayer(tileUrl);
+
+    // Update legend title
+    DOM.legendTitle().textContent = `${layer.toUpperCase()} Index`;
+
+    console.info("[CVI Engine] Switched to %s layer.", layer.toUpperCase());
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -465,10 +718,10 @@ const DrawModule = {
         polygon: {
           allowIntersection: false,
           shapeOptions: {
-            color:       "#22c55e",
+            color:       "#ffffff",
             weight:      2,
-            fillColor:   "#22c55e",
-            fillOpacity: 0.15,
+            fillColor:   "transparent",
+            fillOpacity: 0,
           },
           showArea: true,
           metric:   true,
@@ -578,6 +831,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   MapModule.init();
   DrawModule.init();
+  HoverModule.init();
+  LayerToggleModule.init();
   bindButtons();
 
   UIModule.setStatus("Ready — Draw a farm polygon", "idle");

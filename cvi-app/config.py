@@ -10,7 +10,7 @@ Edit this file to tune the engine — no changes to business logic needed.
 # ─────────────────────────────────────────────────────────────────────────────
 # Google Earth Engine
 # ─────────────────────────────────────────────────────────────────────────────
-GEE_PROJECT_ID = "ndvi-492013"
+GEE_PROJECT_ID = "gee-agriculture-492004"
 DATASET = "COPERNICUS/S2_SR_HARMONIZED"   # Sentinel-2 Surface Reflectance
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -54,9 +54,9 @@ CVI_WEIGHTS = {
 # ─────────────────────────────────────────────────────────────────────────────
 # Grid Parameters
 # ─────────────────────────────────────────────────────────────────────────────
-GRID_SCALE_M = 30          # Default grid cell size (metres)
-MAX_GRID_CELLS = 300       # Hard cap to keep payload lightweight
-GRID_SCALE_STEP_M = 10    # Step size when auto-scaling up to reduce cell count
+GRID_SCALE_M = 10          # High-resolution 10m grid (Sentinel-2 native)
+MAX_GRID_CELLS = 1000       # Increased cap to allow for high-res coverage
+GRID_SCALE_STEP_M = 5      # Finer steps for auto-scaling
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CVI Interpretation Thresholds

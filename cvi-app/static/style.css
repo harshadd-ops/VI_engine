@@ -716,5 +716,162 @@ html, body {
 
 .progress-step--done::before { content: '✓'; color: var(--c-accent); }
 
-/* ── Utility ─────────────────────────────────────────────────────────────── */
+/* ── Smooth GEE Tile Rendering ───────────────────────────────────────────── */
+/* Force bilinear interpolation on tile images — removes pixelated edges    */
+.tile-smooth img {
+  image-rendering: auto !important;
+  image-rendering: optimizeQuality !important;
+  -ms-interpolation-mode: bicubic !important;
+}
+
+/* ── NDVI Hover Tooltip ──────────────────────────────────────────────────── */
+.ndvi-tooltip {
+  position: fixed;
+  z-index: 1100;
+  pointer-events: none;
+  background: #1c1c1c;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-family: var(--font-body);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  transform: translate(10px, 10px);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  line-height: 1.3;
+}
+
+.ndvi-tooltip.is-visible {
+  opacity: 1;
+}
+
+/* ── NDVI Gradient Legend ────────────────────────────────────────────────── */
+.ndvi-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.ndvi-legend__bar {
+  width: 100%;
+  height: 14px;
+  border-radius: 7px;
+  background: linear-gradient(
+    to right,
+    #8b0000 0%,
+    #ff4500 12.5%,
+    #ff8c00 25%,
+    #ffd700 37.5%,
+    #adff2f 50%,
+    #7fff00 62.5%,
+    #32cd32 75%,
+    #228b22 87.5%,
+    #006400 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.ndvi-legend__labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text-faint);
+  padding: 0 2px;
+}
+
+.ndvi-legend__title {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--c-text-muted);
+  margin-bottom: 2px;
+}
+
+/* ── Layer Toggle Controls ───────────────────────────────────────────────── */
+.layer-toggle {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 800;
+  display: flex;
+  gap: 0;
+  background: rgba(10, 15, 20, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  padding: 4px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  transform: translateX(-50%) translateY(10px);
+}
+
+.layer-toggle.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
+.layer-toggle__btn {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--c-text-muted);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+.layer-toggle__btn:hover {
+  color: var(--c-text);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.layer-toggle__btn.is-active {
+  background: var(--c-accent);
+  color: #0a0f14;
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.35);
+}
+
+.layer-toggle__btn.is-active:hover {
+  background: #2ad964;
+}
+
+/* ── Leaflet Popup Override — EOS Dark Theme ───────────────────────────── */
+.cvi-popup .leaflet-popup-content-wrapper {
+  background: #1c1c1c;
+  color: #fff;
+  border-radius: 12px;
+  padding: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+}
+
+.cvi-popup .leaflet-popup-tip {
+  background: #1c1c1c;
+}
+
+.cvi-popup .leaflet-popup-content {
+  margin: 12px 16px;
+  line-height: inherit;
+}
+
+.cvi-popup .leaflet-popup-close-button {
+  color: #a1a1aa !important;
+  padding: 8px 8px 0 0 !important;
+}
+
+.cvi-popup .leaflet-popup-close-button:hover {
+  color: #fff !important;
+}
 [hidden] { display: none !important; }

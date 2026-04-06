@@ -4,6 +4,8 @@ services/gee_service.py — Google Earth Engine Data Layer
 Responsibilities:
     - Initialise the Earth Engine Python API
     - Fetch and pre-process Sentinel-2 imagery for a given polygon
+    - Generate smooth, bicubic-resampled tile URLs for heatmap layers
+    - Sample single-pixel values at arbitrary coordinates (hover support)
 
 This module is the only place in the codebase that talks directly to GEE.
 All other modules receive ee.Image or ee.Geometry objects from here.
@@ -137,9 +139,56 @@ def get_sentinel_composite(
     return composite, collection, scene_count
 
 
+def get_smooth_tile_url(
+    image: ee.Image,
+    ee_geometry: ee.Geometry,
+    band: str,
+    vis_params: dict,
+) -> str | None:
+    """
+    Generate a smooth, bicubic-resampled GEE tile URL for a single band.
+
+    Pipeline:
+        1. Select the target band
+        2. Clip strictly to the farm polygon
+        3. Apply bicubic resampling to eliminate pixelation
+        4. Mask invalid values (< 0 for vegetation indices)
+        5. Generate map tile URL with continuous gradient palette
+
+    Args:
+        image      : Multi-band ee.Image containing computed indices.
+        ee_geometry: Farm polygon geometry for clipping.
+        band       : Band name to visualize (e.g. 'NDVI', 'CVI').
+        vis_params : Dict with 'min', 'max', 'palette' keys.
+
+    Returns:
+        Tile URL string or None on failure.
+    """
+    try:
+        # Select band → clip to polygon → mask negatives → bicubic resample → reproject
+        smooth_image = (
+            image
+            .select(band)
+            .clip(ee_geometry)
+            .updateMask(image.select(band).gte(0))
+            .resample('bicubic')
+            .reproject(crs='EPSG:4326', scale=10)
+            .focal_mean(2, 'circle', 'pixels')
+        )
+
+        map_id_dict = smooth_image.getMapId(vis_params)
+        url = map_id_dict['tile_fetcher'].url_format
+        logger.info("Smooth tile URL generated for band=%s", band)
+        return url
+    except Exception as exc:
+        logger.error("Failed to generate smooth tile URL for %s: %s", band, exc)
+        return None
+
+
 def get_image_tile_url(image: ee.Image, vis_params: dict) -> str | None:
     """
     Get a temporary GEE map tile URL for the given image and visualization params.
+    Legacy function kept for backward compatibility.
     """
     try:
         map_id_dict = ee.data.getMapId({'image': image, **vis_params})
@@ -148,3 +197,43 @@ def get_image_tile_url(image: ee.Image, vis_params: dict) -> str | None:
         logger.error("Failed to generate tile URL: %s", exc)
         return None
 
+
+def sample_point_value(
+    image: ee.Image,
+    lat: float,
+    lng: float,
+    band: str = "NDVI",
+    scale: int = 10,
+) -> float | None:
+    """
+    Sample a single pixel value at the given coordinate.
+
+    Used for real-time hover tooltips — extracts the value of a specific
+    vegetation index at the cursor location.
+
+    Args:
+        image: Multi-band ee.Image with computed indices.
+        lat  : Latitude (WGS-84).
+        lng  : Longitude (WGS-84).
+        band : Band name to sample (default: 'NDVI').
+        scale: Spatial resolution in metres (default: 10m for Sentinel-2).
+
+    Returns:
+        Float value of the band at (lat, lng), or None if masked/unavailable.
+    """
+    try:
+        point = ee.Geometry.Point([lng, lat])
+        result = image.select(band).reduceRegion(
+            reducer=ee.Reducer.first(),
+            geometry=point,
+            scale=scale,
+            maxPixels=1,
+        ).getInfo()
+
+        value = result.get(band)
+        if value is not None:
+            return round(value, 4)
+        return None
+    except Exception as exc:
+        logger.error("Point sampling failed at (%.4f, %.4f): %s", lat, lng, exc)
+        return None

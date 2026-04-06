@@ -8,6 +8,8 @@ Routes:
     POST /api/analyze → Receives a GeoJSON polygon, runs the full CVI
                         pipeline, and returns a GeoJSON FeatureCollection
                         with per-cell vegetation metrics.
+    GET  /api/sample  → Samples a single pixel value at a coordinate
+                        for real-time hover tooltips.
 
 Architecture:
     - Routes delegate all logic to the services layer
@@ -26,7 +28,13 @@ if hasattr(sys.stdout, "reconfigure"):
 from flask import Flask, request, jsonify, render_template
 
 from config import LOG_LEVEL, LOG_FORMAT, LOG_DATE, LOG_FILE, GEE_PROJECT_ID
-from services.gee_service import initialize_gee, get_sentinel_composite, get_image_tile_url
+from services.gee_service import (
+    initialize_gee,
+    get_sentinel_composite,
+    get_image_tile_url,
+    get_smooth_tile_url,
+    sample_point_value,
+)
 from services.index_service import compute_all_indices
 from services.grid_service import generate_grid, reduce_grid_values
 from services.stats_service import extract_farm_statistics
@@ -54,6 +62,12 @@ app = Flask(
     template_folder="templates",
     static_folder="static",
 )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EOS-style NDVI palette (continuous gradient, beige → dark green)
+# ─────────────────────────────────────────────────────────────────────────────
+NDVI_PALETTE = ['#8b0000', '#ff3c00', '#ff7a00', '#ffb300', '#fff200', '#c6ff00', '#7dff00', '#2aff00', '#007f00']
+CVI_PALETTE  = ['#ef4444', '#f59e0b', '#22c55e']
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -94,7 +108,9 @@ def analyze():
         GeoJSON FeatureCollection where each Feature has:
             geometry   → Grid cell polygon
             properties → { ndvi, evi, savi, ndmi, ndwi, gndvi, cvi, interpretation }
-        farm_summary   → Full farm statistical summary (mean values) and confidence.
+        farm_summary    → Full farm statistical summary (mean values) and confidence.
+        ndvi_tile_url   → Smooth bicubic-resampled NDVI heatmap tile URL (EOS-style)
+        tile_url        → CVI heatmap tile URL (legacy)
 
     Errors:
         400 → Invalid / missing geometry
@@ -144,14 +160,31 @@ def analyze():
         farm_summary = extract_farm_statistics(indexed_image, collection, ee_geometry, scene_count)
         result_geojson["farm_summary"] = farm_summary
 
-        # ── 7. Generate GEE Tile URL for Heatmap ─────────────────────────────
-        vis_params = {
-            'bands': ['CVI'],
-            'min': 0.0,
-            'max': 1.0,
-            'palette': ['#ef4444', '#f59e0b', '#22c55e'] # Red -> Yellow -> Green
-        }
-        result_geojson["tile_url"] = get_image_tile_url(indexed_image, vis_params)
+        # ── 7. Generate index tile URLs (EOS-style smooth heatmaps) ──────────
+        index_vis = {'min': 0.0, 'max': 1.0, 'palette': NDVI_PALETTE}
+        cvi_vis   = {'min': 0.0, 'max': 1.0, 'palette': CVI_PALETTE}
+        
+        index_tiles = {}
+        for band in ["NDVI", "EVI", "SAVI", "NDMI", "NDWI", "GNDVI"]:
+            index_tiles[f"{band.lower()}_tile_url"] = get_smooth_tile_url(
+                indexed_image, ee_geometry, band, index_vis
+            )
+        
+        # CVI tile (custom weights)
+        index_tiles["cvi_tile_url"] = get_smooth_tile_url(
+            indexed_image, ee_geometry, "CVI", cvi_vis
+        )
+        
+        # Backward compatibility for existing fields
+        result_geojson["ndvi_tile_url"] = index_tiles["ndvi_tile_url"]
+        result_geojson["tile_url"]      = index_tiles["cvi_tile_url"]
+        
+        # New full-index structure
+        result_geojson["index_tiles"] = index_tiles
+
+        # ── 8. Cache for hover sampling ──────────────────────────────────────
+        app._last_indexed_image = indexed_image
+        app._last_ee_geometry = ee_geometry
 
         logger.info(
             "Analysis complete — %d scenes, %d grid cells returned, Confidence: %.4f",
@@ -163,6 +196,54 @@ def analyze():
     except Exception as exc:
         logger.exception("Pipeline error during analysis: %s", exc)
         return jsonify({"error": f"Pipeline error: {str(exc)}"}), 500
+
+
+@app.route("/api/sample", methods=["GET"])
+def sample():
+    """
+    GET /api/sample?lat=...&lng=...&band=NDVI
+
+    Samples a single pixel value at the given coordinate from the most
+    recent analysis result. Used for real-time hover tooltips.
+
+    Query params:
+        lat  : Latitude (float, required)
+        lng  : Longitude (float, required)
+        band : Band name to sample (default: 'NDVI')
+
+    Response (JSON):
+        { "value": 0.7834, "band": "NDVI" }
+
+    Errors:
+        400 → Missing lat/lng
+        404 → No analysis available
+        503 → GEE not initialised
+    """
+    if not getattr(app, "_gee_ready", False):
+        return jsonify({"error": "GEE not initialised"}), 503
+
+    # Check if we have a cached analysis
+    indexed_image = getattr(app, "_last_indexed_image", None)
+    if indexed_image is None:
+        return jsonify({"error": "No analysis available. Run an analysis first."}), 404
+
+    # Parse params
+    try:
+        lat = float(request.args.get("lat"))
+        lng = float(request.args.get("lng"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "lat and lng are required numeric parameters."}), 400
+
+    band = request.args.get("band", "NDVI").upper()
+
+    # Validate band name
+    valid_bands = ["NDVI", "EVI", "SAVI", "NDMI", "NDWI", "GNDVI", "CVI"]
+    if band not in valid_bands:
+        return jsonify({"error": f"Invalid band. Must be one of: {valid_bands}"}), 400
+
+    value = sample_point_value(indexed_image, lat, lng, band, scale=10)
+
+    return jsonify({"value": value, "band": band}), 200
 
 
 # ─────────────────────────────────────────────────────────────────────────────

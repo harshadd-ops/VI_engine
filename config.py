@@ -10,7 +10,7 @@ Modify this file to tune the engine — no changes to core logic needed.
 # ─────────────────────────────────────────────────────────────────────────────
 # Google Earth Engine
 # ─────────────────────────────────────────────────────────────────────────────
-GEE_PROJECT_ID = "ndvi-492013"
+GEE_PROJECT_ID = "gee-agriculture-492004"
 
 # Sentinel-2 Surface Reflectance (NOT TOA)
 DATASET = "COPERNICUS/S2_SR_HARMONIZED"

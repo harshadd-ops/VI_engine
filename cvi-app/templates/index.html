@@ -80,38 +80,28 @@
         </form>
       </section>
 
-      <!-- Legend Card -->
+      <!-- NDVI Legend Card (EOS-style gradient bar) -->
       <section class="card" id="card-legend" aria-labelledby="legend-heading">
         <h2 class="card__title" id="legend-heading">
-          <span class="card__icon">🎨</span> CVI Legend
+          <span class="card__icon">🎨</span> NDVI Scale
         </h2>
-        <ul class="legend-list" role="list">
-          <li class="legend-item">
-            <span class="legend-swatch legend-swatch--healthy" aria-label="Green"></span>
-            <div class="legend-label">
-              <span class="legend-label__title">Healthy Vegetation</span>
-              <span class="legend-label__range">CVI &gt; 0.6</span>
-            </div>
-          </li>
-          <li class="legend-item">
-            <span class="legend-swatch legend-swatch--moderate" aria-label="Yellow"></span>
-            <div class="legend-label">
-              <span class="legend-label__title">Moderate / Stressed</span>
-              <span class="legend-label__range">CVI 0.3 – 0.6</span>
-            </div>
-          </li>
-          <li class="legend-item">
-            <span class="legend-swatch legend-swatch--poor" aria-label="Red"></span>
-            <div class="legend-label">
-              <span class="legend-label__title">Poor Vegetation</span>
-              <span class="legend-label__range">CVI &lt; 0.3</span>
-            </div>
-          </li>
+        <div class="ndvi-legend" role="img" aria-label="NDVI gradient from 0 to 1">
+          <span class="ndvi-legend__title">Vegetation Health (Continuous)</span>
+          <div class="ndvi-legend__bar"></div>
+          <div class="ndvi-legend__labels">
+            <span>0.0 — Bare</span>
+            <span>0.25</span>
+            <span>0.5</span>
+            <span>0.75</span>
+            <span>1.0 — Dense</span>
+          </div>
+        </div>
+        <ul class="legend-list" role="list" style="margin-top: 14px;">
           <li class="legend-item">
             <span class="legend-swatch legend-swatch--nodata" aria-label="Grey"></span>
             <div class="legend-label">
               <span class="legend-label__title">No Data</span>
-              <span class="legend-label__range">Cloud / masked</span>
+              <span class="legend-label__range">Cloud / masked / water</span>
             </div>
           </li>
         </ul>
@@ -146,6 +136,33 @@
     <!-- ─── Map Container ──────────────────────────────────── -->
     <div class="map-wrapper">
       <div id="map" role="application" aria-label="Interactive farm map"></div>
+
+      <!-- NDVI Hover Tooltip -->
+      <div class="ndvi-tooltip" id="ndvi-tooltip" aria-hidden="true"></div>
+
+      <!-- Layer Toggle (NDVI / CVI / EVI / SAVI / NDMI / GNDVI) -->
+      <div class="layer-toggle" id="layer-toggle" aria-label="Layer toggle">
+        <button class="layer-toggle__btn is-active" id="btn-layer-ndvi" data-layer="ndvi">NDVI</button>
+        <button class="layer-toggle__btn" id="btn-layer-evi" data-layer="evi">EVI</button>
+        <button class="layer-toggle__btn" id="btn-layer-savi" data-layer="savi">SAVI</button>
+        <button class="layer-toggle__btn" id="btn-layer-ndmi" data-layer="ndmi">NDMI</button>
+        <button class="layer-toggle__btn" id="btn-layer-gndvi" data-layer="gndvi">GNDVI</button>
+        <button class="layer-toggle__btn" id="btn-layer-cvi" data-layer="cvi">CVI (Fusion)</button>
+      </div>
+
+      <!-- Heatmap Legend -->
+      <div class="ndvi-legend" id="ndvi-legend" aria-hidden="true" hidden>
+        <div class="ndvi-legend__title" id="ndvi-legend-title">NDVI Index</div>
+        <div class="ndvi-legend__bar"></div>
+        <div class="ndvi-legend__labels">
+          <span>0.0</span>
+          <span>0.2</span>
+          <span>0.4</span>
+          <span>0.6</span>
+          <span>0.8</span>
+          <span>1.0</span>
+        </div>
+      </div>
 
       <!-- Loading Overlay -->
       <div class="loading-overlay" id="loading-overlay" aria-hidden="true" hidden>
