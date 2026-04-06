@@ -137,14 +137,50 @@ def get_sentinel_composite(
     return composite, collection, scene_count
 
 
-def get_image_tile_url(image: ee.Image, vis_params: dict) -> str | None:
+def get_recent_background_url(ee_geometry: ee.Geometry) -> str | None:
+    """
+    Generate a natural color (RGB) Sentinel-2 median composite URL 
+    for the given region to use as a 'Recent Satellite' background.
+    """
+    end_date = datetime.date.today()
+    start_date = end_date - datetime.timedelta(days=LOOKBACK_DAYS)
+
+    collection = (
+        ee.ImageCollection(DATASET)
+        .filterBounds(ee_geometry)
+        .filterDate(start_date.isoformat(), end_date.isoformat())
+        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", MAX_CLOUD_COVER_PCT))
+        .map(_mask_clouds_scl)
+    )
+
+    if collection.size().getInfo() == 0:
+        return None
+
+    # Natural Color (RGB) Median Composite 
+    # Use B4, B3, B2 for Sentinel-2 Natural Color
+    rgb_composite = collection.median()
+    
+    vis_params = {
+        'bands': ['B4', 'B3', 'B2'],
+        'min': '0,0,0',
+        'max': '3000,3000,3000', # Sentinel-2 SR data is DN scaled to 10000 but we want it bright
+        'gamma': '1.4'
+    }
+    
+    return get_image_tile_url(rgb_composite, vis_params)
+
+
+def get_image_tile_url(image: ee.Image, vis_params: dict, geometry: ee.Geometry | None = None) -> str | None:
     """
     Get a temporary GEE map tile URL for the given image and visualization params.
+    Optionally clips the imagery to the provided geometry.
     """
     try:
-        map_id_dict = ee.data.getMapId({'image': image, **vis_params})
+        display_image = image.clip(geometry) if geometry else image
+        map_id_dict = ee.data.getMapId({'image': display_image, **vis_params})
         return map_id_dict['tile_fetcher'].url_format
     except Exception as exc:
         logger.error("Failed to generate tile URL: %s", exc)
         return None
+
 

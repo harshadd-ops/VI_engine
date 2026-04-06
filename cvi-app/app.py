@@ -144,25 +144,40 @@ def analyze():
         farm_summary = extract_farm_statistics(indexed_image, collection, ee_geometry, scene_count)
         result_geojson["farm_summary"] = farm_summary
 
-        # ── 7. Generate GEE Tile URL for Heatmap ─────────────────────────────
+        # ── 7. Generate Clipped Smooth Heatmap Tile URL ───────────────────────
+        # Using a much smoother 7-stop palette for the 'EOS' look
         vis_params = {
             'bands': ['CVI'],
-            'min': 0.0,
-            'max': 1.0,
-            'palette': ['#ef4444', '#f59e0b', '#22c55e'] # Red -> Yellow -> Green
+            'min': '0.0',
+            'max': '1.0',
+            'palette': [
+                '#de1c1c', # Strong Red (Poor)
+                '#ef4444', # Red
+                '#f59e0b', # Amber (Moderate)
+                '#facc15', # Yellow
+                '#84cc16', # Lime
+                '#22c55e', # Green (Healthy)
+                '#15803d'  # Deep Green
+            ]
         }
-        result_geojson["tile_url"] = get_image_tile_url(indexed_image, vis_params)
+        # Clip to farm boundary for sharp edges
+        result_geojson["tile_url"] = get_image_tile_url(indexed_image, vis_params, geometry=ee_geometry)
+        
+        # ── 8. Generate Recent Satellite Background URL (Sentinel-2 RGB) ─────
+        from services.gee_service import get_recent_background_url
+        result_geojson["tile_url_bg"] = get_recent_background_url(ee_geometry)
 
         logger.info(
-            "Analysis complete — %d scenes, %d grid cells returned, Confidence: %.4f",
+            "Analysis complete — %d scenes, %d grid cells, Baseline URL: %s",
             scene_count,
             len(result_geojson.get("features", [])),
-            farm_summary["confidence"],
+            "available" if result_geojson["tile_url_bg"] else "none"
         )
         return jsonify(result_geojson), 200
     except Exception as exc:
         logger.exception("Pipeline error during analysis: %s", exc)
         return jsonify({"error": f"Pipeline error: {str(exc)}"}), 500
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

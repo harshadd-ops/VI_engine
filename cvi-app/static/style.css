@@ -716,5 +716,49 @@ html, body {
 
 .progress-step--done::before { content: '✓'; color: var(--c-accent); }
 
+/* ── Leaflet Layers Control ─────────────────────────────────────────────── */
+.leaflet-control-layers {
+  background: var(--c-surface-2) !important;
+  border: 1px solid var(--c-border) !important;
+  border-radius: var(--r-md) !important;
+  box-shadow: var(--shadow-card) !important;
+  color: var(--c-text) !important;
+  font-family: var(--font-body) !important;
+  padding: 8px 12px !important;
+}
+
+.leaflet-control-layers-expanded {
+  min-width: 180px;
+}
+
+.leaflet-control-layers label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 4px 0 !important;
+  cursor: pointer;
+  font-size: 13px !important;
+  color: var(--c-text-muted) !important;
+  transition: color var(--t-fast);
+}
+
+.leaflet-control-layers label:hover {
+  color: var(--c-text) !important;
+}
+
+.leaflet-control-layers-separator {
+  border-top: 1px solid var(--c-border) !important;
+  margin: 6px -12px !important;
+}
+
+.leaflet-control-layers input[type="radio"],
+.leaflet-control-layers input[type="checkbox"] {
+  accent-color: var(--c-accent);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
 /* ── Utility ─────────────────────────────────────────────────────────────── */
 [hidden] { display: none !important; }
+

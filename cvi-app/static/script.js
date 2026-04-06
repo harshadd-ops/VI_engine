@@ -27,7 +27,9 @@ const STATE = {
   map:          null,
   drawnLayer:   null,   // The user's drawn polygon layer
   gridLayer:    null,   // The GEE result grid layer
-  geeLayer:     null,   // The GEE heatmap tile layer
+  geeLayer:     null,   // The GEE heatmap tile layer (smooth)
+  baseLayerS2:  null,   // The Recent Satellite background layer
+  layerControl: null,
   isLoading:    false,
   currentStep:  0,      // Progress step tracker
   stepTimer:    null,
@@ -224,8 +226,8 @@ const MapModule = {
       attributionControl: true,
     });
 
-    // Google Maps Satellite (Hybrid with Labels)
-    L.tileLayer(
+    // 1. Google Maps Satellite (Standard High-Res)
+    const googleSatellite = L.tileLayer(
       "http://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
       {
         maxZoom: 20,
@@ -233,6 +235,16 @@ const MapModule = {
         attribution: "Map data © Google",
       }
     ).addTo(STATE.map);
+
+    // Initialise Layer Control (Top Right)
+    const baseMaps = {
+        "Standard (Google)": googleSatellite
+    };
+    
+    STATE.layerControl = L.control.layers(baseMaps, {}, { 
+        position: 'topright',
+        collapsed: false 
+    }).addTo(STATE.map);
 
     console.info("[CVI Engine] Leaflet map initialized with Google Satellite.");
   },
@@ -248,6 +260,7 @@ const MapModule = {
   /** GeoJSON style function for grid cells */
   _cellStyle(feature) {
     // Keep it invisible array so the smooth heatmap shows, but cell is interactive
+    // We add a sharp border to the polygon as a whole in renderGrid
     return {
       fillColor:   "transparent",
       fillOpacity: 0,
@@ -306,10 +319,14 @@ const MapModule = {
 
   /** Render the GeoJSON FeatureCollection returned by the API */
   renderGrid(geojsonData) {
-    // Remove previous grid layer
+    // 1. Cleanup previous analysis layers
     if (STATE.gridLayer) {
       STATE.map.removeLayer(STATE.gridLayer);
       STATE.gridLayer = null;
+    }
+    if (STATE.geeLayer) {
+      STATE.map.removeLayer(STATE.geeLayer);
+      STATE.geeLayer = null;
     }
 
     if (!geojsonData.features || geojsonData.features.length === 0) {
@@ -317,19 +334,31 @@ const MapModule = {
       return;
     }
 
-    // Add GEE Heatmap Layer if available
+    // 2. Add Recent Satellite Baseline Toggle (if URL provided)
+    if (geojsonData.tile_url_bg) {
+        if (STATE.baseLayerS2) {
+            STATE.layerControl.removeLayer(STATE.baseLayerS2);
+            STATE.map.removeLayer(STATE.baseLayerS2);
+        }
+        STATE.baseLayerS2 = L.tileLayer(geojsonData.tile_url_bg, {
+            attribution: "Sentinel-2 (Last 90 Days)",
+            maxZoom: 20
+        });
+        STATE.layerControl.addBaseLayer(STATE.baseLayerS2, "Recent (Sentinel-2)");
+        console.info("[CVI Engine] Recent Satellite baseline added to layer control.");
+    }
+
+    // 3. Add Smooth Transition Heatmap Layer (Clipped to Polygon)
     if (geojsonData.tile_url) {
-      if (STATE.geeLayer) {
-        STATE.map.removeLayer(STATE.geeLayer);
-      }
       STATE.geeLayer = L.tileLayer(geojsonData.tile_url, {
         attribution: "Google Earth Engine",
-        opacity: 0.75, // slightly transparent so grid lines are still visible
+        opacity: 0.9,
       }).addTo(STATE.map);
     }
 
+    // 4. Create Leaflet GeoJSON layer (Invisible but interactive)
     STATE.gridLayer = L.geoJSON(geojsonData, {
-      style:       MapModule._cellStyle,
+      style: MapModule._cellStyle,
       onEachFeature(feature, layer) {
         const html = MapModule._buildPopupHTML(feature.properties);
         layer.bindPopup(html, {
@@ -337,7 +366,6 @@ const MapModule = {
           className: "cvi-popup",
         });
 
-        // Hover highlight
         layer.on({
           mouseover(e) {
             e.target.setStyle({
@@ -353,11 +381,22 @@ const MapModule = {
       },
     }).addTo(STATE.map);
 
+    // 5. Apply Sharp White Border to the drawn polygon
+    if (STATE.drawnLayer) {
+        STATE.drawnLayer.setStyle({
+            color: "#ffffff",
+            weight: 3,
+            fillOpacity: 0,
+            dashArray: ""
+        });
+        STATE.drawnLayer.bringToFront();
+    }
+
     // Fit map to grid bounds
     STATE.map.fitBounds(STATE.gridLayer.getBounds(), { padding: [20, 20] });
 
     console.info(
-      "[CVI Engine] Grid rendered: %d features.",
+      "[CVI Engine] Grid & Heatmap rendered: %d features.",
       geojsonData.features.length
     );
   },
@@ -372,7 +411,16 @@ const MapModule = {
       STATE.map.removeLayer(STATE.geeLayer);
       STATE.geeLayer = null;
     }
+    // Optionally reset drawn layer style
+    if (STATE.drawnLayer) {
+        STATE.drawnLayer.setStyle({
+            color: "#22c55e",
+            weight: 2,
+            fillOpacity: 0.15
+        });
+    }
   },
+
 
   /** Fly to a specific coordinate */
   flyTo(lat, lon) {
